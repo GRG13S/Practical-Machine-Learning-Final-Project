@@ -1,0 +1,160 @@
+---
+title: "Peer graded Assignment, Prediction Assignment Writeup"
+author: "ilias_369@hotmail.com"
+date: "31/1/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Backround
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+## Purpose of this Project
+The purpose of this project is to choose the appropriate machine learning algorithm to predict the manner in which the six participants performed the above exercises, using the "classe" variable in the training set. We will also use the prediction model to predict the 20 different test cases.
+
+## Data Source
+The data for this project came from the source:  http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har.
+
+Reference:
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. “Qualitative Activity Recognition of Weight Lifting Exercises. Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human ’13)”. Stuttgart, Germany: ACM SIGCHI, 2013.
+
+## Data Preparation
+
+We begin with loading the data and the libraries we will use and setting the seed.
+```{r libraries}
+library(caret)
+library(gbm)
+library(rattle) #for the tree plot
+set.seed(369)
+```
+
+```{r import data}
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+
+# Training set splitting & cleaning
+
+We split the training set as follows: 
+```{r }
+trainRule <- createDataPartition(y=training$classe, p=0.7, list=F)
+training1 <- training[trainRule, ]
+validation <- training[-trainRule, ]
+```
+
+In the data (both training and testing) there are many NA in specific columns (variables) and in fact these columns consist almost entirely of NA, so whole of them must be removed. Also we must remove all the near-zero variance predictors and 1-5 variables that can't participate in prediction. 
+
+```{r train cleaning, cache=TRUE }
+#removing near-zero variance predictors
+ZeroVar1 <- nearZeroVar(training)
+training1Clear <- training1[, -ZeroVar1]
+validationClear <- validation[, -ZeroVar1]
+
+#removing predictors with many NA values
+training1Clear <- training1Clear[, colSums(is.na(training1Clear)) == 0]
+validationClear <- validationClear[, colSums(is.na(validationClear)) == 0]
+  
+#removing variables that can't participate in prediction
+training1Clear <- training1Clear[, -(1:5)]
+validationClear <- validationClear[, -(1:5)]
+```
+
+
+Testing set cleaning
+```{r test cleaning}
+#removing near-zero variance predictors
+ZeroVar2 <- nearZeroVar(testing)
+testingClear <- testing[, -ZeroVar2]
+
+#removing predictors with many NA values
+testingClear <- testingClear[, colSums(is.na(testingClear)) == 0]
+
+#removing variables that can't participate in prediction
+testingClear <- testingClear[, -(1:5)]
+
+```
+
+## Building the candidate models
+
+We will try 3 candidate models:
+1) Recursive Partitioning and Regression Trees.
+2) Generalized Boosted Model.
+3) Random Forest Model.
+
+# Recursive Partitioning and Regression Trees
+
+First we fit the model and then we predict in validation set.
+As you can see below, this model has poor fit (Overall acurracy 0.5711) and is not suitable for predictions.
+
+```{r tree, cache=TRUE}
+r_part <- train(classe ~ ., data = training1Clear, method = "rpart")
+fancyRpartPlot(r_part$finalModel)
+```
+
+
+```{r prediction with tree, cache=TRUE}
+r_part_pred <- predict(r_part, newdata = validationClear)
+r_part.Conf.Matrix <- confusionMatrix(r_part_pred,factor(validationClear$classe))
+r_part.Conf.Matrix
+```
+
+
+# Generalized Boosted Model 
+
+We will perform one time repeated 10-fold cross validation to Generalized Boosted and Random Forest Model.
+
+```{r cross validation rule}
+trainCtrl <- trainControl(method = "repeatedcv", number = 10, repeats = 1)
+```
+
+```{r gbm, cache=TRUE}
+GBM <- train(classe ~ ., data = training1Clear, method = "gbm",
+                  trControl = trainCtrl, verbose = FALSE)
+GBM$finalModel
+```
+
+The predictions on the validation set:
+```{r prediction with gbm, cache=TRUE}
+GBMpred <- predict(GBM, newdata = validationClear)
+GBM.Conf.Matrix <- confusionMatrix(GBMpred, factor(validationClear$classe))
+GBM.Conf.Matrix
+```
+
+We can clearly see a very high overall accuracy of 0.9864, and also very high scores in all accuracy measures.
+
+# Random Forest Model
+
+We finally build a Random Forest Model (called RMD in R code):
+```{r rf, cache=TRUE}
+RMD <- train(classe ~ ., data = training1Clear, method = "rf",
+                  trControl = trainCtrl, verbose = FALSE)
+RMD$finalModel
+```
+
+The predictions on the validation set:
+```{r prediction with rf, cache=TRUE}
+RMDpred <- predict(RMD, newdata = validationClear)
+RMD.Conf.Matrix <- confusionMatrix(RMDpred, factor(validationClear$classe))
+RMD.Conf.Matrix
+```
+
+As it seems, the Random Forest Model perform almost perfect. The overall accuracy is 0.9985 and other accuracy measures are in the highest level.
+
+## Applying the Random Forest Model to the 20 test cases
+
+```{r predictions on testing set, cache=TRUE}
+testing.pred <- as.data.frame(predict(RMD, newdata = testingClear))
+testing.pred
+```
+
+## Out of Sample error
+For a classification problem the error of the prediction measured by all accuracy measures that appears in confusion matrix above. Here didnt use the validation set to train the model and we have accuracy 0.9981, so the miss classification out of sample error is 1-0.9981 = 0,0015.
+
+
+
